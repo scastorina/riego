@@ -18,7 +18,7 @@ DB_PATH = APP_DIR / "lotes.db"
 st.set_page_config(page_title="Lotes - Python App", layout="wide")
 
 @st.cache_data
-def load_geojson(path: Path) -> gpd.GeoDataFrame:
+def load_geojson(path: Path, _mtime: float) -> gpd.GeoDataFrame:
     gdf = gpd.read_file(path)
     if "id" not in gdf.columns:
         gdf["id"] = range(1, len(gdf) + 1)
@@ -71,7 +71,7 @@ if uploaded_geo:
     st.sidebar.success("GeoJSON actualizado. Recarga el mapa si no se ve.")
 
 ensure_db_schema(DB_PATH)
-gdf = load_geojson(DATA_GEOJSON)
+gdf = load_geojson(DATA_GEOJSON, DATA_GEOJSON.stat().st_mtime)
 
 st.title("Gestión de Lotes (Python + Streamlit)")
 st.caption("Replica simple de la versión Shiny: mapa, edición de tabla y exportación.")
