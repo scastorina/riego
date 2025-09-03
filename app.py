@@ -49,12 +49,62 @@ def fetch_table() -> pd.DataFrame:
     return df
 
 def upsert_rows(df: pd.DataFrame):
+    """Update or insert rows without wiping the whole table."""
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
-    # naive upsert: delete all and insert current (simpler for demo)
-    cur.execute("DELETE FROM lotes")
+    for _, row in df.iterrows():
+        cur.execute("SELECT id FROM lotes WHERE poligono_id = ?", (row["poligono_id"],))
+        exists = cur.fetchone()
+        if exists:
+            cur.execute(
+                """
+                UPDATE lotes
+                SET Sector = ?, Lote = ?, OCUPACION = ?, Sup = ?, fecha = ?
+                WHERE poligono_id = ?
+                """,
+                (
+                    row.get("Sector"),
+                    row.get("Lote"),
+                    row.get("OCUPACION"),
+                    row.get("Sup"),
+                    row.get("fecha"),
+                    row.get("poligono_id"),
+                ),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO lotes (poligono_id, Sector, Lote, OCUPACION, Sup, fecha)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row.get("poligono_id"),
+                    row.get("Sector"),
+                    row.get("Lote"),
+                    row.get("OCUPACION"),
+                    row.get("Sup"),
+                    row.get("fecha"),
+                ),
+            )
     con.commit()
-    df.to_sql("lotes", con, if_exists="append", index=False)
+    con.close()
+
+
+def update_riego_fecha(poligono_id: int, fecha):
+    """Update the watering date for a given polygon id."""
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    fecha_str = fecha.strftime("%Y-%m-%d") if fecha else None
+    cur.execute("SELECT id FROM lotes WHERE poligono_id = ?", (poligono_id,))
+    exists = cur.fetchone()
+    if exists:
+        cur.execute("UPDATE lotes SET fecha = ? WHERE poligono_id = ?", (fecha_str, poligono_id))
+    else:
+        cur.execute(
+            "INSERT INTO lotes (poligono_id, fecha) VALUES (?, ?)",
+            (poligono_id, fecha_str),
+        )
+    con.commit()
     con.close()
 
 def export_excel(df: pd.DataFrame) -> bytes:
@@ -73,6 +123,9 @@ if uploaded_geo:
 
 ensure_db_schema(DB_PATH)
 gdf = load_geojson(DATA_GEOJSON, DATA_GEOJSON.stat().st_mtime)
+
+if "lotes_seleccionados" not in st.session_state:
+    st.session_state["lotes_seleccionados"] = []
 
 st.title("Gestión de Lotes (Python + Streamlit)")
 st.caption("Replica simple de la versión Shiny: mapa, edición de tabla y exportación.")
@@ -95,6 +148,19 @@ with col_map:
     ).add_to(m)
     folium.LayerControl().add_to(m)
     map_state = st_folium(m, width=None, height=600)
+    if map_state and map_state.get("last_active_drawing"):
+        props = map_state["last_active_drawing"].get("properties", {})
+        poligono_id = props.get("id")
+        if poligono_id and poligono_id not in st.session_state["lotes_seleccionados"]:
+            st.session_state["lotes_seleccionados"].append(poligono_id)
+
+    st.write("Lotes seleccionados:", st.session_state["lotes_seleccionados"])
+    fecha_riego = st.date_input("Fecha de riego", datetime.today().date())
+    if st.button("Guardar riego") and st.session_state["lotes_seleccionados"]:
+        for pid in st.session_state["lotes_seleccionados"]:
+            update_riego_fecha(pid, fecha_riego)
+        st.success("Riego guardado")
+        st.session_state["lotes_seleccionados"] = []
 
 with col_table:
     st.subheader("Edición de datos")
