@@ -45,6 +45,7 @@ def fetch_table() -> pd.DataFrame:
     con = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT * FROM lotes", con)
     con.close()
+    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce").dt.date
     return df
 
 def upsert_rows(df: pd.DataFrame):
@@ -99,7 +100,7 @@ with col_table:
     if df.empty:
         # bootstrap with one example row
         df = pd.DataFrame([{
-            "id": None, "poligono_id": 1, "Sector": "", "Lote": "", "OCUPACION": "", "Sup": None, "fecha": datetime.today().date().isoformat()
+            "id": None, "poligono_id": 1, "Sector": "", "Lote": "", "OCUPACION": "", "Sup": None, "fecha": datetime.today().date()
         }])
 
     edited = st.data_editor(
@@ -114,6 +115,7 @@ with col_table:
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("💾 Guardar cambios", type="primary"):
+            edited["fecha"] = pd.to_datetime(edited["fecha"]).dt.strftime("%Y-%m-%d")
             upsert_rows(edited.fillna(""))
             st.success("Cambios guardados en la base SQLite.")
     with col2:
