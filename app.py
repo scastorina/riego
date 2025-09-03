@@ -82,7 +82,9 @@ col_map, col_table = st.columns([1.3, 1.0], gap="large")
 
 with col_map:
     st.subheader("Mapa de Lotes")
-    m = folium.Map(location=[-39.0, -67.0], zoom_start=11, control_scale=True)
+    bounds = gdf.to_crs(4326).total_bounds  # [minx, miny, maxx, maxy]
+    m = folium.Map(zoom_start=13, control_scale=True)
+    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
     folium.GeoJson(
         data=gdf.to_json(),
         name="Lotes",
