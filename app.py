@@ -25,9 +25,11 @@ def load_geojson(path: Path, _mtime: float) -> gpd.GeoDataFrame:
     return gdf
 
 def ensure_db_schema(db_path: Path):
+    """Create base tables if they don't exist."""
     con = sqlite3.connect(db_path)
     cur = con.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS lotes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             poligono_id INTEGER,
@@ -37,24 +39,51 @@ def ensure_db_schema(db_path: Path):
             Sup REAL,
             fecha TEXT
         )
-    """)
+        """
+    )
+    # Historical irrigation records
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS riego_historial (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            poligono_id INTEGER NOT NULL,
+            fecha_riego TEXT NOT NULL
+        )
+        """
+    )
     con.commit()
     con.close()
 
 def fetch_table() -> pd.DataFrame:
+    """Return lot information with the latest irrigation date."""
     con = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM lotes", con)
+    query = """
+    SELECT l.id, l.poligono_id, l.Sector, l.Lote, l.OCUPACION, l.Sup,
+           rh.fecha_riego AS fecha
+    FROM lotes l
+    LEFT JOIN (
+        SELECT poligono_id, MAX(fecha_riego) AS fecha_riego
+        FROM riego_historial
+        GROUP BY poligono_id
+    ) rh ON l.poligono_id = rh.poligono_id
+    """
+    df = pd.read_sql_query(query, con)
     con.close()
     df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce").dt.date
     return df
 
-def upsert_rows(df: pd.DataFrame):
+def insert_riego_rows(df: pd.DataFrame):
+    """Insert irrigation records for the given lots."""
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
-    # naive upsert: delete all and insert current (simpler for demo)
-    cur.execute("DELETE FROM lotes")
+    for _, row in df.iterrows():
+        if pd.isna(row.get("fecha")) or pd.isna(row.get("poligono_id")):
+            continue
+        cur.execute(
+            "INSERT INTO riego_historial (poligono_id, fecha_riego) VALUES (?, ?)",
+            (int(row["poligono_id"]), str(row["fecha"]))
+        )
     con.commit()
-    df.to_sql("lotes", con, if_exists="append", index=False)
     con.close()
 
 def export_excel(df: pd.DataFrame) -> bytes:
@@ -73,6 +102,19 @@ if uploaded_geo:
 
 ensure_db_schema(DB_PATH)
 gdf = load_geojson(DATA_GEOJSON, DATA_GEOJSON.stat().st_mtime)
+df = fetch_table()
+latest_by_poligono = df.set_index("poligono_id")["fecha"].to_dict()
+
+
+def semaforo_color(fecha_val):
+    if fecha_val is None or pd.isna(fecha_val):
+        return "#FFFFFF"
+    days = (datetime.today().date() - fecha_val).days
+    if days <= 3:
+        return "#4CAF50"
+    if days <= 7:
+        return "#FFEB3B"
+    return "#F44336"
 
 st.title("Gestión de Lotes (Python + Streamlit)")
 st.caption("Replica simple de la versión Shiny: mapa, edición de tabla y exportación.")
@@ -90,20 +132,32 @@ with col_map:
         name="Lotes",
         tooltip=folium.GeoJsonTooltip(fields=[c for c in gdf.columns if c != "geometry"][:8]),
         popup=folium.GeoJsonPopup(fields=[c for c in gdf.columns if c != "geometry"][:8]),
-        style_function=lambda feat: {"fillColor": "#4A89DC", "color": "#34495E", "weight": 1, "fillOpacity": 0.6},
+        style_function=lambda feat: {
+            "fillColor": semaforo_color(latest_by_poligono.get(feat["properties"].get("id"))),
+            "color": "#34495E",
+            "weight": 1,
+            "fillOpacity": 0.6,
+        },
         highlight_function=lambda feat: {"color": "#E9573F", "weight": 3},
     ).add_to(m)
     folium.LayerControl().add_to(m)
     map_state = st_folium(m, width=None, height=600)
 
 with col_table:
-    st.subheader("Edición de datos")
-    df = fetch_table()
+    st.subheader("Registrar riego")
     if df.empty:
         # bootstrap with one example row
-        df = pd.DataFrame([{
-            "id": None, "poligono_id": 1, "Sector": "", "Lote": "", "OCUPACION": "", "Sup": None, "fecha": datetime.today().date()
-        }])
+        df = pd.DataFrame([
+            {
+                "id": None,
+                "poligono_id": 1,
+                "Sector": "",
+                "Lote": "",
+                "OCUPACION": "",
+                "Sup": None,
+                "fecha": datetime.today().date(),
+            }
+        ])
 
     edited = st.data_editor(
         df,
@@ -111,19 +165,24 @@ with col_table:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "fecha": st.column_config.DateColumn(format="YYYY-MM-DD")
+            "fecha": st.column_config.DateColumn(format="YYYY-MM-DD"),
         }
     )
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("💾 Guardar cambios", type="primary"):
+        if st.button("💾 Guardar riego", type="primary"):
             edited["fecha"] = pd.to_datetime(edited["fecha"]).dt.strftime("%Y-%m-%d")
-            upsert_rows(edited.fillna(""))
-            st.success("Cambios guardados en la base SQLite.")
+            insert_riego_rows(edited[["poligono_id", "fecha"]])
+            st.success("Riego registrado en la base SQLite.")
     with col2:
         if st.button("⬇️ Exportar a Excel"):
             xlsx = export_excel(edited)
-            st.download_button("Descargar lotes.xlsx", data=xlsx, file_name="lotes.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button(
+                "Descargar lotes.xlsx",
+                data=xlsx,
+                file_name="lotes.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
     st.caption("Consejo: use 'poligono_id' para relacionar filas con polígonos por su 'id' en el GeoJSON.")
 
