@@ -153,13 +153,18 @@ if uploaded_geo:
 ensure_db_schema(DB_PATH)
 
 if not DATA_GEOJSON.exists():
-    st.warning("No encuentro 'Lotes_geo.geojson'. Subí uno desde la barra lateral para continuar.")
+    st.warning(
+        "No encuentro 'Lotes_geo.geojson'. Subí uno desde la barra lateral para continuar."
+    )
     gdf = gpd.GeoDataFrame({"id": [], "geometry": []}, geometry="geometry", crs="EPSG:4326")
+    gdf_meta = pd.DataFrame(columns=["id", "Lote", "Sector", "OCUPACION"])
 else:
     gdf = load_geojson(DATA_GEOJSON, DATA_GEOJSON.stat().st_mtime)
+    gdf_meta = gdf[["id", "Lote", "Sector", "OCUPACION"]].copy()
 
 df = fetch_table()
 latest_by_poligono = df.set_index("poligono_id")["fecha"].to_dict()
+df_lotes = df if not df.empty else gdf_meta.rename(columns={"id": "poligono_id"})
 
 def semaforo_color(fecha_val):
     if fecha_val is None or pd.isna(fecha_val):
@@ -233,7 +238,7 @@ else:
     map_state = None
 
 st.subheader("Lotes seleccionados")
-df_sel = df[df["poligono_id"].isin(st.session_state["lotes_seleccionados"])]
+df_sel = df_lotes[df_lotes["poligono_id"].isin(st.session_state["lotes_seleccionados"])]
 if not df_sel.empty:
     st.table(
         df_sel[["Lote", "Sector", "OCUPACION"]]
