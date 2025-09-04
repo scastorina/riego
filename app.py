@@ -171,6 +171,8 @@ def semaforo_color(fecha_val):
         return "#FFEB3B"
     return "#F44336"
 
+if "lotes_seleccionados" not in st.session_state:
+    st.session_state["lotes_seleccionados"] = []
 
 def lote_style(feat):
     """Estilo del polígono considerando la selección."""
@@ -189,18 +191,18 @@ def lote_style(feat):
         "fillOpacity": 0.6,
     }
 
-if "lotes_seleccionados" not in st.session_state:
-    st.session_state["lotes_seleccionados"] = []
-
 st.title("Gestión de Lotes (Python + Streamlit)")
-st.caption("Replica simple de la versión Shiny: mapa, edición de tabla y exportación.")
+st.caption("Replica simple de la versión Shiny: mapa, selección y registro de riego.")
 
 st.subheader("Mapa de Lotes")
 if not gdf.empty:
     bounds = gdf.to_crs(4326).total_bounds
     m = folium.Map(zoom_start=13, control_scale=True)
     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+
+    # Capa satelital opcional + control de capas colapsado
     folium.TileLayer("Esri.WorldImagery", name="Satélite", overlay=False).add_to(m)
+
     folium.GeoJson(
         data=gdf.to_json(),
         name="Lotes",
@@ -209,13 +211,23 @@ if not gdf.empty:
         style_function=lote_style,
         highlight_function=lambda feat: {"color": "#E9573F", "weight": 3},
     ).add_to(m)
+
     folium.LayerControl(collapsed=True).add_to(m)
     map_state = st_folium(m, use_container_width=True, height=800)
-    if map_state and map_state.get("last_object_clicked"):
-        props = map_state["last_object_clicked"].get("properties", {})
-        poligono_id = props.get("id")
-        if poligono_id and poligono_id not in st.session_state["lotes_seleccionados"]:
-            st.session_state["lotes_seleccionados"].append(poligono_id)
+
+    # Captura robusta del clic según versión de streamlit-folium
+    poligono_id = None
+    if map_state:
+        if map_state.get("last_object_clicked"):
+            props = map_state["last_object_clicked"].get("properties", {})
+            poligono_id = props.get("id")
+        elif map_state.get("last_active_drawing"):
+            props = map_state["last_active_drawing"].get("properties", {})
+            poligono_id = props.get("id")
+
+    if poligono_id and poligono_id not in st.session_state["lotes_seleccionados"]:
+        st.session_state["lotes_seleccionados"].append(poligono_id)
+        st.rerun()
 else:
     st.info("Subí un GeoJSON para ver el mapa.")
     map_state = None
@@ -241,5 +253,4 @@ if st.button("Guardar riego de seleccionados") and st.session_state["lotes_selec
     st.rerun()
 
 st.divider()
-
 st.markdown("Hecho con **Streamlit**, **geopandas**, **folium**, **sqlite3** 🌱")
