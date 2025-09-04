@@ -167,95 +167,75 @@ def semaforo_color(fecha_val):
         return "#FFEB3B"
     return "#F44336"
 
+
+def lote_style(feat):
+    """Estilo del polígono considerando la selección."""
+    pid = feat["properties"].get("id")
+    if pid in st.session_state.get("lotes_seleccionados", []):
+        return {
+            "fillColor": "#00FF00",
+            "color": "#34495E",
+            "weight": 2,
+            "fillOpacity": 0.7,
+        }
+    return {
+        "fillColor": semaforo_color(latest_by_poligono.get(pid)),
+        "color": "#34495E",
+        "weight": 1,
+        "fillOpacity": 0.6,
+    }
+
 if "lotes_seleccionados" not in st.session_state:
     st.session_state["lotes_seleccionados"] = []
 
 st.title("Gestión de Lotes (Python + Streamlit)")
 st.caption("Replica simple de la versión Shiny: mapa, edición de tabla y exportación.")
 
-# --- Layout ---
-col_map, col_table = st.columns([1.3, 1.0], gap="large")
+st.subheader("Mapa de Lotes")
+if not gdf.empty:
+    bounds = gdf.to_crs(4326).total_bounds
+    m = folium.Map(zoom_start=13, control_scale=True)
+    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+    folium.GeoJson(
+        data=gdf.to_json(),
+        name="Lotes",
+        tooltip=folium.GeoJsonTooltip(fields=[c for c in gdf.columns if c != "geometry"][:8]),
+        popup=folium.GeoJsonPopup(fields=[c for c in gdf.columns if c != "geometry"][:8]),
+        style_function=lote_style,
+        highlight_function=lambda feat: {"color": "#E9573F", "weight": 3},
+    ).add_to(m)
+    folium.LayerControl().add_to(m)
+    map_state = st_folium(m, width=None, height=600)
+    if map_state and map_state.get("last_active_drawing"):
+        props = map_state["last_active_drawing"].get("properties", {})
+        poligono_id = props.get("id")
+        if poligono_id and poligono_id not in st.session_state["lotes_seleccionados"]:
+            st.session_state["lotes_seleccionados"].append(poligono_id)
+            st.rerun()
+else:
+    st.info("Subí un GeoJSON para ver el mapa.")
+    map_state = None
 
-with col_map:
-    st.subheader("Mapa de Lotes")
-    if not gdf.empty:
-        bounds = gdf.to_crs(4326).total_bounds
-        m = folium.Map(zoom_start=13, control_scale=True)
-        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-        folium.GeoJson(
-            data=gdf.to_json(),
-            name="Lotes",
-            tooltip=folium.GeoJsonTooltip(fields=[c for c in gdf.columns if c != "geometry"][:8]),
-            popup=folium.GeoJsonPopup(fields=[c for c in gdf.columns if c != "geometry"][:8]),
-            style_function=lambda feat: {
-                "fillColor": semaforo_color(latest_by_poligono.get(feat["properties"].get("id"))),
-                "color": "#34495E",
-                "weight": 1,
-                "fillOpacity": 0.6,
-            },
-            highlight_function=lambda feat: {"color": "#E9573F", "weight": 3},
-        ).add_to(m)
-        folium.LayerControl().add_to(m)
-        map_state = st_folium(m, width=None, height=600)
-        if map_state and map_state.get("last_active_drawing"):
-            props = map_state["last_active_drawing"].get("properties", {})
-            poligono_id = props.get("id")
-            if poligono_id and poligono_id not in st.session_state["lotes_seleccionados"]:
-                st.session_state["lotes_seleccionados"].append(poligono_id)
-    else:
-        st.info("Subí un GeoJSON para ver el mapa.")
-        map_state = None
-
-    st.write("Lotes seleccionados:", st.session_state["lotes_seleccionados"])
-    fecha_riego = st.date_input("Fecha de riego", datetime.today().date())
-    if st.button("Guardar riego de seleccionados") and st.session_state["lotes_seleccionados"]:
-        to_insert = pd.DataFrame(
-            [{"poligono_id": pid, "fecha": fecha_riego} for pid in st.session_state["lotes_seleccionados"]]
-        )
-        insert_riego_rows(to_insert)
-        st.success("Riego guardado en historial.")
-        st.session_state["lotes_seleccionados"] = []
-        st.rerun()
-
-with col_table:
-    st.subheader("Registrar riego y metadatos")
-    if df.empty:
-        df = pd.DataFrame([{
-            "id": None, "poligono_id": 1, "Sector": "",
-            "Lote": "", "OCUPACION": "", "Sup": None,
-            "fecha": datetime.today().date(),
-        }])
-    edited = st.data_editor(
-        df,
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "fecha": st.column_config.DateColumn("Último riego", format="YYYY-MM-DD"),
-            "Sup": st.column_config.NumberColumn("Sup (ha)", step=0.01),
-            "poligono_id": st.column_config.NumberColumn("poligono_id", step=1),
-        }
+st.subheader("Lotes seleccionados")
+df_sel = df[df["poligono_id"].isin(st.session_state["lotes_seleccionados"])]
+if not df_sel.empty:
+    st.table(
+        df_sel[["Lote", "Sector", "OCUPACION"]]
+        .rename(columns={"Sector": "Chacra", "OCUPACION": "Cobertura"})
     )
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("💾 Guardar riego (tabla)", type="primary"):
-            insert_riego_rows(edited[["poligono_id", "fecha"]])
-            st.success("Riego(s) registrado(s).")
-            st.rerun()
-    with col2:
-        if st.button("🧭 Guardar metadatos de lotes"):
-            upsert_lotes(edited)
-            st.success("Metadatos guardados.")
-            st.rerun()
-    with col3:
-        if st.button("⬇️ Exportar a Excel"):
-            xlsx = export_excel(edited)
-            st.download_button(
-                "Descargar lotes.xlsx",
-                data=xlsx,
-                file_name="lotes.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+else:
+    st.write("No hay lotes seleccionados.")
+
+fecha_riego = st.date_input("Fecha de riego", datetime.today().date())
+if st.button("Guardar riego de seleccionados") and st.session_state["lotes_seleccionados"]:
+    to_insert = pd.DataFrame(
+        [{"poligono_id": pid, "fecha": fecha_riego} for pid in st.session_state["lotes_seleccionados"]]
+    )
+    insert_riego_rows(to_insert)
+    st.success("Riego guardado en historial.")
+    st.session_state["lotes_seleccionados"] = []
+    st.rerun()
 
 st.divider()
+
 st.markdown("Hecho con **Streamlit**, **geopandas**, **folium**, **sqlite3** 🌱")
