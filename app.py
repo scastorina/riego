@@ -176,8 +176,12 @@ if "lotes_seleccionados" not in st.session_state:
 
 def lote_style(feat):
     """Estilo del polígono considerando la selección."""
-    pid = feat["properties"].get("id")
-    if pid in st.session_state.get("lotes_seleccionados", []):
+    pid_val = feat["properties"].get("id")
+    try:
+        pid = int(pid_val)
+    except (TypeError, ValueError):
+        pid = None
+    if pid is not None and pid in st.session_state.get("lotes_seleccionados", []):
         return {
             "fillColor": "#00FF00",
             "color": "#34495E",
@@ -220,12 +224,19 @@ if not gdf.empty:
     if map_state:
         if map_state.get("last_object_clicked"):
             props = map_state["last_object_clicked"].get("properties", {})
-            poligono_id = props.get("id")
+            pid_val = props.get("id")
         elif map_state.get("last_active_drawing"):
             props = map_state["last_active_drawing"].get("properties", {})
-            poligono_id = props.get("id")
+            pid_val = props.get("id")
+        else:
+            pid_val = None
+        if pid_val is not None:
+            try:
+                poligono_id = int(pid_val)
+            except (TypeError, ValueError):
+                poligono_id = None
 
-    if poligono_id and poligono_id not in st.session_state["lotes_seleccionados"]:
+    if poligono_id is not None and poligono_id not in st.session_state["lotes_seleccionados"]:
         st.session_state["lotes_seleccionados"].append(poligono_id)
         st.rerun()
 else:
@@ -233,7 +244,7 @@ else:
     map_state = None
 
 st.subheader("Lotes seleccionados")
-df_sel = df[df["poligono_id"].isin(st.session_state["lotes_seleccionados"])]
+df_sel = df[df["poligono_id"].isin([int(i) for i in st.session_state["lotes_seleccionados"]])]
 if not df_sel.empty:
     st.table(
         df_sel[["Lote", "Sector", "OCUPACION"]]
