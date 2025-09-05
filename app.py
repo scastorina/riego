@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import sqlite3
 from pathlib import Path
 from datetime import datetime, date
@@ -25,6 +26,12 @@ def load_geojson(path: Path, _mtime: float) -> gpd.GeoDataFrame:
     gdf = gpd.read_file(path)
     if "id" not in gdf.columns:
         gdf["id"] = range(1, len(gdf) + 1)
+    geojson = json.loads(gdf.to_json())
+    for feature in geojson.get("features", []):
+        props = feature.setdefault("properties", {})
+        if "id" not in props and "id" in feature:
+            props["id"] = feature["id"]
+    gdf = gpd.GeoDataFrame.from_features(geojson["features"], crs=gdf.crs)
     return gdf
 
 def ensure_db_schema(db_path: Path):
@@ -176,7 +183,8 @@ if "lotes_seleccionados" not in st.session_state:
 
 def lote_style(feat):
     """Estilo del polígono considerando la selección."""
-    pid_val = feat["properties"].get("id")
+    props = feat.get("properties", {})
+    pid_val = props.get("id") or props.get("Lote")
     try:
         pid = int(pid_val)
     except (TypeError, ValueError):
@@ -222,19 +230,19 @@ if not gdf.empty:
     # Captura robusta del clic según versión de streamlit-folium
     poligono_id = None
     if map_state:
+        obj = None
         if map_state.get("last_object_clicked"):
-            props = map_state["last_object_clicked"].get("properties", {})
-            pid_val = props.get("id")
+            obj = map_state["last_object_clicked"]
         elif map_state.get("last_active_drawing"):
-            props = map_state["last_active_drawing"].get("properties", {})
-            pid_val = props.get("id")
-        else:
-            pid_val = None
-        if pid_val is not None:
-            try:
-                poligono_id = int(pid_val)
-            except (TypeError, ValueError):
-                poligono_id = None
+            obj = map_state["last_active_drawing"]
+        if obj:
+            props = obj.get("properties", {})
+            pid_val = obj.get("id") or props.get("id") or props.get("Lote")
+            if pid_val is not None:
+                try:
+                    poligono_id = int(pid_val)
+                except (TypeError, ValueError):
+                    poligono_id = None
 
     if poligono_id is not None and poligono_id not in st.session_state["lotes_seleccionados"]:
         st.session_state["lotes_seleccionados"].append(poligono_id)
