@@ -235,7 +235,7 @@ def on_upload(contents, selected):
 
 
 @app.callback(
-    Output("selected-lots", "data"),
+    Output("selected-lots", "data", allow_duplicate=True),
     Input("guardar", "n_clicks"),
     State("selected-lots", "data"),
     State("fecha-riego", "date"),
