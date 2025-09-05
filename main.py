@@ -9,7 +9,7 @@ import geopandas as gpd
 import pandas as pd
 from dash import Dash, Input, Output, State, dcc, html, exceptions
 import dash_leaflet as dl
-import dash_table
+from dash import dash_table
 
 APP_DIR = Path(__file__).parent
 DATA_GEOJSON = APP_DIR / "Lotes_geo.geojson"
