@@ -215,7 +215,7 @@ def update_selection(selected):
 
 
 @app.callback(
-    Output("geojson", "data"),
+    Output("geojson", "data", allow_duplicate=True),
     Output("map", "center"),
     Input("upload-geojson", "contents"),
     State("selected-lots", "data"),
