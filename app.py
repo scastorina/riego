@@ -203,8 +203,6 @@ def lote_style(feat):
         "fillOpacity": 0.6,
     }
 
-st.title("Gestión de Lotes (Python + Streamlit)")
-st.caption("Replica simple de la versión Shiny: mapa, selección y registro de riego.")
 
 st.subheader("Mapa de Lotes")
 if not gdf.empty:
@@ -272,4 +270,3 @@ if st.button("Guardar riego de seleccionados") and st.session_state["lotes_selec
     st.rerun()
 
 st.divider()
-st.markdown("Hecho con **Streamlit**, **geopandas**, **folium**, **sqlite3** 🌱")
